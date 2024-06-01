@@ -1,21 +1,17 @@
 package rsp.hn;
 
 import rsp.App;
-import rsp.jetty.JettyServer;
-import rsp.routing.Routing;
+import rsp.component.ComponentView;
+import rsp.jetty.WebServer;
 import rsp.server.StaticResources;
-import rsp.stateview.ComponentView;
-import rsp.util.StreamUtils;
 
 import java.io.File;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 
 import static java.lang.Float.parseFloat;
 import static rsp.html.HtmlDsl.*;
-import static rsp.routing.RoutingDsl.get;
 import static rsp.util.ArrayUtils.concat;
 
 /**
@@ -26,9 +22,10 @@ public class JettyHn {
     public static void main(String[] args) throws Exception {
         final HnApiService hnApi = new HnApiService();
         final var bodyRef = createElementRef();
+        final var window = window();
         final ComponentView<State> render = state -> newState ->
             html(head(link(attr("rel", "stylesheet"), attr("href","/res/style.css"))),
-                    body(bodyRef,
+                    body(elementId(bodyRef),
                         div(attr("class", "header"),
                             h3(text("Hacker News"))),
                         div(attr("class", "content"),
@@ -38,17 +35,16 @@ public class JettyHn {
                                             a(attr("href", story.getValue().url), text(story.getValue().name))
                                     ))
                               )),
-                        window().on("scroll", c -> {
-                            final var windowProps = c.props(window());
-                            final var bodyProps = c.props(bodyRef);
+                        window.on("scroll", c -> {
+                            final var windowProps = c.propertiesByRef(window.ref());
+                            final var bodyProps = c.propertiesByRef(bodyRef);
                             windowProps.getString("innerHeight")
                                        .thenCompose(innerHeight -> windowProps.getString("pageYOffset")
                                        .thenCompose(pageYOffset -> bodyProps.getString("offsetHeight")
                                        .thenAccept(offsetHeight -> {
                                            if ((parseFloat(innerHeight) + parseFloat(pageYOffset)) >= parseFloat(offsetHeight)) {
-                                               //final State currentState = state;
                                                final int newPageNum = state.pageNum + 1;
-                                               final List<Integer> newStoriesIds = pageIds(Arrays.stream(state.storiesIds).boxed().collect(Collectors.toList()),
+                                               final List<Integer> newStoriesIds = pageIds(Arrays.stream(state.storiesIds).boxed().toList(),
                                                                                            newPageNum,
                                                                                            HnApiService.PAGE_SIZE);
                                                final CompletableFuture<State> newStateCf = hnApi.stories(newStoriesIds)
@@ -57,7 +53,7 @@ public class JettyHn {
                                                                                                                 concat(state.stories,
                                                                                                                        newStories.toArray(State.Story[]::new)),
                                                                                                                 newPageNum));
-                                               newState.applyWhenComplete(newStateCf);
+                                               newState.setStateWhenComplete(newStateCf);
                                            }
                                        })));
                         }).debounce(500)
@@ -70,9 +66,9 @@ public class JettyHn {
                                                     r.toArray(State.Story[]::new),
                                                     0)));
 
-        final var server = new JettyServer<>(8080,"", new App<>(new Routing<>(get("", req -> route)),
-                                                                             render),
-                                                    new StaticResources(new File("src/main/java/rsp/examples/hn"),
+        final var server = new WebServer(8080, new App<>(route,
+                                                              render),
+                                                    new StaticResources(new File("src/main/java/rsp/hn"),
                                                                    "/res/*"));
         server.start();
         server.join();
